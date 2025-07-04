@@ -40,25 +40,36 @@ top15.coalesce(1).write.csv("result_folder1", header=True, mode="overwrite")
 
 """
 
-from pyspark.sql.functions import sum, round as spark_round, length
+from pyspark.sql.functions import max as spark_max, round as spark_round
 
-df_countries = df.filter((length("iso_code") == 3))
+df_countries = df.filter(length("iso_code") == 3)
 
-df_last_week = df_countries.filter((col("date") >= "2021-03-25") & (col("date") <= "2021-03-31"))
+df_week = df_countries.filter((col("date") >= "2021-03-25") & (col("date") <= "2021-03-31"))
 
-weekly_cases = df_last_week.groupBy("location").agg(
-    sum("new_cases").alias("total_new_cases")
+max_per_country = df_week.groupBy("location").agg(
+    spark_max("new_cases").alias("max_new_cases")
 )
 
-top10_cleaned = weekly_cases.orderBy(col("total_new_cases").desc()).limit(10)
+df_week_alias = df_week.alias("week")
+max_alias = max_per_country.alias("max")
 
-top10_result = top10_cleaned.withColumn("кол_во_новых_случаев", spark_round("total_new_cases", 0)) \
-                            .withColumnRenamed("location", "страна") \
-                            .select("страна", "кол_во_новых_случаев")
+df_with_max = df_week_alias.join(
+    max_alias,
+    (col("week.location") == col("max.location")) &
+    (col("week.new_cases") == col("max.max_new_cases")),
+    how="inner"
+).select(
+    col("week.date").alias("число"),
+    col("week.location").alias("страна"),
+    spark_round(col("week.new_cases"), 0).alias("кол_во_новых_случаев")
+).distinct()
 
-top10_result.show(truncate=False)
+top10_max_day = df_with_max.orderBy(col("кол_во_новых_случаев").desc()).limit(10)
 
-top10_result.coalesce(1).write.csv("result_folder2", header=True, mode="overwrite")
+top10_max_day.show(truncate=False)
+
+
+top10_max_day.coalesce(1).write.csv("result_folder2", header=True, mode="overwrite")
 
 
 """Посчитайте изменение случаев относительно предыдущего дня в России за последнюю неделю марта 2021. (например: в россии вчера было 9150 , сегодня 8763, итог: -387) (в выходящем датасете необходимы колонки: число, кол-во новых случаев вчера, кол-во новых случаев сегодня, дельта)"""
